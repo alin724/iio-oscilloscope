@@ -80,27 +80,19 @@ stages:
         path: '$(Agent.BuildDirectory)/s/download/'
       displayName: 'Get libad9166-iio artifacts'
     - script: |
-        sudo apt-get -qq update
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential libxml2-dev libcurl4-openssl-dev libmatio-dev libglib2.0-dev libfftw3-dev libusb-1.0-0-dev
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-3-dev libgtk-3-bin libjansson-dev doxygen libaio-dev libavahi-client-dev libserialport-dev
-        wget https://downloads.sourceforge.net/project/gtkdatabox/gtkdatabox-1/gtkdatabox-1.0.0.tar.gz
-        tar xvf gtkdatabox-1.0.0.tar.gz
-        cd gtkdatabox-1.0.0
-        ./configure
-        ls -al
-        sudo make install
-        cd ..
-        sudo dpkg -i $PACKAGE_TO_INSTALL
+        ./CI/azure/build_osc_ubuntu.sh install_apt_pkgs
+        ./CI/azure/build_osc_ubuntu.sh install_adi_debs
+        ./CI/azure/build_osc_ubuntu.sh install_gtkdatabox
       displayName: 'Install Dependencies'
     - script: |
-        mkdir build && cd build 
-        cmake ../
-        make
+        ./CI/azure/build_osc_ubuntu.sh build_osc
       displayName: "Build"
     - task: PublishPipelineArtifact@1
       inputs:
         targetPath: '$(Build.ArtifactStagingDirectory)'
         artifactName: '$(artifactName)'
+
+  #######################################
 
   - job: ARMBuilds
     # Host Box
@@ -112,22 +104,18 @@ stages:
         ubuntu-ppc64le:
           image: tfcollins/libiio_ubuntu_18_04-ci-arm-ppc:latest
           arch: ppc64le
-          build_script: ci-ubuntu.sh
           artifactName: 'Ubuntu-ppc64le'
         ubuntu-x390x:
           image: tfcollins/libiio_ubuntu_18_04-ci-arm-ppc:latest
           arch: s390x
-          build_script: ci-ubuntu.sh
           artifactName: 'Ubuntu-x390x'
         debian_buster_arm32v7:
           image: tfcollins/libiio_ubuntu_18_04-ci-arm-ppc:latest
           arch: arm
-          build_script: ci-ubuntu.sh
           artifactName: 'Ubuntu-arm32v7'
         debian_buster_arm64v8:
           image: tfcollins/libiio_ubuntu_18_04-ci-arm-ppc:latest
           arch: aarch64
-          build_script: ci-ubuntu.sh
           artifactName: 'Ubuntu-arm64v8'
     steps:
     - checkout: self
@@ -174,13 +162,72 @@ stages:
       displayName: "Setup"
     - script: |
         set -e
-        sudo docker run --platform "linux/$(arch)" --rm -t --privileged -e ARTIFACTNAME=$(artifactName) -v "$(Agent.BuildDirectory)/s":"/ci" -v "/usr/bin/qemu-$(arch)-static":"/usr/bin/qemu-$(arch)-static" "$(image)" /bin/bash -c "cd /ci/ && chmod +x ./CI/travis/install_deps.sh && ./CI/travis/install_deps.sh"
-      displayName: "Install iio"
+        sudo docker run --platform "linux/$(arch)" --rm -t --privileged -e ARTIFACTNAME=$(artifactName) -v "$(Agent.BuildDirectory)/s":"/ci" -v "/usr/bin/qemu-$(arch)-static":"/usr/bin/qemu-$(arch)-static" "$(image)" /bin/bash -c "cd /ci/ && chmod +x ./CI/azure/build_osc_arm.sh && ./CI/azure/build_osc_arm.sh install_apt_pkgs && ./CI/azure/build_osc_arm.sh install_adi_debs"
+      displayName: "Install dependencies"
     - script: |
         set -e
-        sudo docker run --platform "linux/$(arch)" --rm -t --privileged -e ARTIFACTNAME=$(artifactName) -v "$(Agent.BuildDirectory)/s":"/ci" -v "/usr/bin/qemu-$(arch)-static":"/usr/bin/qemu-$(arch)-static" "$(image)" /bin/bash -c "cd /ci/ && chmod +x ./CI/travis/$(build_script) && ./CI/travis/$(build_script)"
+        sudo docker run --platform "linux/$(arch)" --rm -t --privileged -e ARTIFACTNAME=$(artifactName) -v "$(Agent.BuildDirectory)/s":"/ci" -v "/usr/bin/qemu-$(arch)-static":"/usr/bin/qemu-$(arch)-static" "$(image)" /bin/bash -c "cd /ci/ && chmod +x ./CI/azure/build_osc_arm.sh && ./CI/azure/build_osc_arm.sh build_osc"
       displayName: "Build"
     - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifactName: '$(artifactName)'
+
+  #########################################
+
+  - job: macOSBuilds
+    strategy:
+      matrix:
+        macOS_11:
+          imageName: 'macOS-11'
+          artifactName: 'macOS-11'
+        macOS_12:
+          imageName: 'macOS-12'
+          artifactName: 'macOS-12'
+    pool:
+      vmImage: $(imageName)
+    steps:
+    - checkout: self
+      fetchDepth: 1
+      clean: true
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        source: 'specific'
+        project: '$(System.TeamProjectId)'
+        pipeline: $(libiioPipelineId)
+        artifact: '$(artifactName)'
+        runVersion: 'latestFromBranch'
+        runBranch: 'refs/heads/master'
+        path: '$(Agent.BuildDirectory)/s/download/'
+      displayName: 'Get libiio artifacts'
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        source: 'specific'
+        project: '$(System.TeamProjectId)'
+        pipeline: $(libad9361iioPipelineId)
+        artifact: '$(artifactName)'
+        runVersion: 'latestFromBranch'
+        runBranch: 'refs/heads/master'
+        path: '$(Agent.BuildDirectory)/s/download/'
+      displayName: 'Get libad9361-iio artifacts'
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        source: 'specific'
+        project: '$(System.TeamProjectId)'
+        pipeline: $(libad9166iioPipelineId)
+        artifact: '$(artifactName)'
+        runVersion: 'latestFromBranch'
+        runBranch: 'refs/heads/master'
+        path: '$(Agent.BuildDirectory)/s/download/'
+      displayName: 'Get libad9166-iio artifacts'
+    - script: |
+        ./CI/azure/build_osc_darwin.sh install_deps
+        ./CI/azure/build_osc_darwin.sh install_adi_debs
+      displayName: "Install Dependencies"
+    - script: ./CI/azure/build_osc_darwin.sh build_osc
+      displayName: "Build"
+    - task: PublishPipelineArtifact@1
+      condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
       inputs:
         targetPath: '$(Build.ArtifactStagingDirectory)'
         artifactName: '$(artifactName)'
